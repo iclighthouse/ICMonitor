@@ -136,9 +136,15 @@ dfx canister --network ic call 73hjh-6qaaa-aaaak-aacaq-cai subscription '(princi
 dfx canister --network ic call 73hjh-6qaaa-aaaak-aacaq-cai getEvents '(opt principal "<your_canister_id>", opt principal "<your_account_principal>", null, null)'
 ````
 
-### (Optional) Step6 取消订阅
+### 取消订阅
 
 ````
 dfx canister --network ic call 73hjh-6qaaa-aaaak-aacaq-cai unsubscribe '(principal "<your_canister_id>", principal "<your_account_principal>")'
 ````
+
+## Roadmap
+
+- (doing) 完善UI界面
+- 使用IC内部Heartbeat触发监视事件
+- 使用Dmail发送Email提醒，实现完全去中心化。
 
