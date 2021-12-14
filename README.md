@@ -1,6 +1,6 @@
 # ICMonitor
 
-**Website:** https://ICMonitor.io  
+**Website:** http://ICMonitor.io  
 **Canister id:** 73hjh-6qaaa-aaaak-aacaq-cai  
 **ModuleHash:** 7500f02327d8c6e6df96b33ba92f88e039b3103c631f3efe0868ea2e7b2894c9
 
@@ -40,7 +40,7 @@ ICMonitor提供的监视类型包括：
 
 ## 如何使用（命令行界面与ICMonitor合约交互）
 
-Notes: UI界面 https://ICMonitor.io
+Notes: UI界面 http://ICMonitor.io
 
 ### 订阅（Subscribe）
 
