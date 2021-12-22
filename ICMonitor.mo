@@ -32,7 +32,7 @@ import Hex "./lib/Hex";
 import Tools "./lib/Tools";
 import Error "mo:base/Error";
 import CF "./lib/CF";
-import Monitee "./lib/Monitee";
+import DRC207 "./lib/DRC207";
 
 shared(installMsg) actor class ICMonitor() = this {
     /// types
@@ -40,7 +40,7 @@ shared(installMsg) actor class ICMonitor() = this {
     type Heartbeat = Int; // Number of heartbeats
     type Subscriber = Principal;
     type CanisterId = Principal;
-    type CanisterStatus = Blackhole.canister_status;
+    type CanisterStatus = DRC207.canister_status;
     type EnAutoRenewal = Bool; // The canister SHOULD implement wallet_receive()
     type RenewalValue = Nat; // e8s
     type EventType = {
@@ -50,7 +50,7 @@ shared(installMsg) actor class ICMonitor() = this {
         #CyclesLessThan: Nat;
         #ControllersChanged;
         #ModuleHashChanged;
-        #TimerTick: Nat; // interval heartheats
+        #TimerTick; 
     };
     type Subscription = {
         canister: CanisterId;
@@ -98,26 +98,25 @@ shared(installMsg) actor class ICMonitor() = this {
     };
 
     /// stable variables
-    private stable var BLACKHOLE: Text = "7hdtw-jqaaa-aaaak-aaccq-cai";  //e3mmv-5qaaa-aaaah-aadma-cai
     private stable var INTERVAL: Int = 60 * 1000000000; // Monitor heartbeat interval
-    private stable var EVENT_HEARTBEATS: Int = 24*60; // The same event is sent only once within a period of x heartbeats.
+    private stable var EVENT_HEARTBEATS: Int = 3*24*12; // The same event is sent only once within a period of x heartbeats.
     private stable var ICP_FEE: Nat64 = 10000; // e8s 
     private stable var DEAL_SIZE: Nat = 30; // Monitors 10 containers each time
-    private stable var CFACCOUNTID: Hex.Hex = "b04ba15229debb8e2cf631570ab2735b4dd1bde9437d3f9622e2c786f87ad8f5"; // = cyclesFinance.getAccountId(Principal.fromActor(this));
+    private stable var BLACKHOLE: Text = "7hdtw-jqaaa-aaaak-aaccq-cai";
+    private stable var CFACCOUNTID: Hex.Hex = "f4be3d790b8d9bd16bf4b2407268d87d58c5a7a3b9e9264a2cfbd33d030cc98b"; // = cyclesFinance.getAccountId("73hjh-6qaaa-aaaak-aacaq-cai");
     private stable var owner: Principal = installMsg.caller;
     private stable var launchTime: Time.Time = Time.now(); 
     private stable var monitorStats: MonitorStats = { heartbeatCount = 0; canisterCount = 0; subscriberCount = 0; updateTime = Time.now(); };
-    private stable var canisters: Trie.Trie<CanisterId, (CanisterStatus, Heartbeat)> = Trie.empty();
+    private stable var canisters: Trie.Trie<CanisterId, (CanisterStatus, Heartbeat, DRC207.DRC207Support)> = Trie.empty();
     private stable var subscriptions: Trie.Trie2D<CanisterId, Subscriber, ([EventType], EnAutoRenewal, RenewalValue, Heartbeat)> = Trie.empty();
     private stable var events = Deque.empty<Event>();
     private stable var eventFilter: Trie.Trie<EventKey, Heartbeat> = Trie.empty();
     private stable var heartbeatIndex: Heartbeat = 0;
     private stable var eventCount: Nat = 0; //
     private stable var transferIndex: Nat64 = 0;
-    private stable var blackhole: Blackhole.Self = actor(BLACKHOLE); 
     private stable var cfAccountId: AccountId = Option.get(Tools.accountHexToAccountBlob(CFACCOUNTID), Blob.fromArray([]));
     private let ledger: Ledger.Self = actor("ryjl3-tyaaa-aaaaa-aaaba-cai");
-    private let cyclesFinance: CF.Self = actor("ium3d-eqaaa-aaaak-aab4q-cai");
+    private let cyclesFinance: CF.Self = actor("6nmrm-laaaa-aaaak-aacfq-cai");
     /**
      * Local functions
      */
@@ -132,7 +131,7 @@ shared(installMsg) actor class ICMonitor() = this {
             case(#CyclesLessThan(v)){ eventNo:=4 };
             case(#ControllersChanged){ eventNo:=5 };
             case(#ModuleHashChanged){ eventNo:=6 };
-            case(#TimerTick(v)){ eventNo:=7 };
+            case(#TimerTick){ eventNo:=7 };
         };
         return { key = t; hash = Principal.hash(t.canisterId) & Principal.hash(t.subscriber) | eventNo;  }; 
     };
@@ -144,7 +143,7 @@ shared(installMsg) actor class ICMonitor() = this {
     };  // assert(_onlyOwner(msg.caller));
     private func _onlyCanisterController(_caller: Principal, _canisterId: CanisterId) : Bool { 
         switch(Trie.get(canisters, keyp(_canisterId), Principal.equal)){
-            case(?(status, hb)){ 
+            case(?(status, hb, drc207)){ 
                 switch(Array.find(status.settings.controllers, func (p:Principal):Bool{ Principal.equal(_caller,p) })){
                     case(?(controller)){ return true; };
                     case(_){ return false; };
@@ -242,10 +241,10 @@ shared(installMsg) actor class ICMonitor() = this {
             return false;
         };
     };
-    private func _pushEvent(_event: Event): (){ // Save up to 5000 records
+    private func _pushEvent(_event: Event): (){ // Save up to 3000 records
         events := Deque.pushFront(events, _event);
         var size = List.size(events.0) + List.size(events.1);
-        while (size > 5000){
+        while (size > 3000){
             size -= 1;
             switch (Deque.popBack(events)){
                 case(?(q, v)){
@@ -281,6 +280,76 @@ shared(installMsg) actor class ICMonitor() = this {
              };
         };
     };
+    private func _getCanisterStatus(_canisterId: CanisterId, _init: Bool) : async ?(CanisterStatus, Heartbeat, DRC207.DRC207Support){
+        let canisterActor: DRC207.Self = actor(Principal.toText(_canisterId));
+        var timerSetting : { enable: Bool; interval_seconds: ?Nat; } = { enable = false; interval_seconds = null; }; 
+        var drc207Setting: DRC207.DRC207Support = {
+            monitorable_by_self = false;
+            monitorable_by_blackhole = { allowed = false; canister_id = null; };
+            cycles_receivable = false;
+            timer = timerSetting; 
+        };
+        var temp: [CanisterStatus] = [];
+        if (_init){
+            try {
+                drc207Setting := await canisterActor.drc207();
+            }catch(e){
+                try{
+                    await canisterActor.timer_tick(); 
+                    timerSetting := { enable = true; interval_seconds = ?0; }; 
+                }catch(e){};
+                try{
+                    let blackholeActor: Blackhole.Self = actor(BLACKHOLE);
+                    ignore await blackholeActor.canister_status({canister_id = _canisterId; }); 
+                    drc207Setting := {
+                        monitorable_by_self = false;
+                        monitorable_by_blackhole = { allowed = true; canister_id = ?Principal.fromText(BLACKHOLE); };
+                        cycles_receivable = false;
+                        timer = timerSetting; 
+                    };
+                }catch(e){
+                    try{
+                        ignore await canisterActor.canister_status(); 
+                        drc207Setting := {
+                            monitorable_by_self = true;
+                            monitorable_by_blackhole = { allowed = false; canister_id = null; };
+                            cycles_receivable = false;
+                            timer = timerSetting; 
+                        };
+                    }catch(e){
+                        return null;
+                    };
+                };
+            };
+        } else {
+            switch(Trie.get(canisters, keyp(_canisterId), Principal.equal)){
+                case(?(status, hbi, setting)){
+                    temp := [status];
+                    drc207Setting := setting;
+                };
+                case(_){ return null; };
+            };
+        };
+        try {
+            if (drc207Setting.monitorable_by_self){
+                temp := [await canisterActor.canister_status()];
+            }else if (drc207Setting.monitorable_by_blackhole.allowed){
+                switch(drc207Setting.monitorable_by_blackhole.canister_id){
+                    case(?(blackholeCanisterId)){ 
+                        let blackholeActor: Blackhole.Self = actor(Principal.toText(blackholeCanisterId));
+                        temp := [await blackholeActor.canister_status({canister_id = _canisterId; })]; 
+                    };
+                    case(_){ return null; };
+                };
+            }else{
+                return null;
+            };
+        }catch(e){
+            return null;
+        };
+        canisters := Trie.put(canisters, keyp(_canisterId), Principal.equal, (temp[0], heartbeatIndex, drc207Setting)).0;
+        return ?(temp[0], heartbeatIndex, drc207Setting);
+    };
 
     /* 
      * Shared Functions
@@ -292,15 +361,16 @@ shared(installMsg) actor class ICMonitor() = this {
         return {totalHeartbeat = beat1 - beat0; monitorStats = monitorStats; eventCount = eventCount};
     };
     /// canister subscribes events
-    public shared(msg) func subscribe(_sub: Subscription) : async (){
-        let canisterStatus = await blackhole.canister_status({canister_id = _sub.canister});
-        // assert(Option.isSome(
-        //     Array.find(status.settings.controllers, func (p: Principal): Bool{ Principal.equal(msg.caller, p) })
-        // ));
+    public shared(msg) func subscribe(_sub: Subscription) : async Bool{
         let optCanister = Trie.get(canisters, keyp(_sub.canister), Principal.equal);
         var canisterCount = monitorStats.canisterCount;
-        if (Option.isNull(optCanister)) { canisterCount += 1; };
         var hasSubscribed: Bool = false;
+        var subscriberCount = monitorStats.subscriberCount;
+        switch(await _getCanisterStatus(_sub.canister, true)){
+            case(?(status, hbi, setting)){};
+            case(_){ return false;};
+        };
+        if (Option.isNull(optCanister)) { canisterCount += 1; };
         switch(Trie.get(subscriptions, keyp(_sub.canister), Principal.equal)){
             case(?(trie)){
                 for ((subscriber, subInfo) in Trie.iter(trie)){
@@ -309,16 +379,15 @@ shared(installMsg) actor class ICMonitor() = this {
             };
             case(_){};
         };
-        var subscriberCount = monitorStats.subscriberCount;
         if (not(hasSubscribed)) { subscriberCount += 1; };
         // access
         assert(not(hasSubscribed) or 
             _onlyCanisterSubscriber(msg.caller, _sub.canister) or 
             _onlyCanisterController(msg.caller, _sub.canister));
-        canisters := Trie.put(canisters, keyp(_sub.canister), Principal.equal, (canisterStatus, Time.now()/INTERVAL)).0;
         subscriptions := Trie.put2D(subscriptions, keyp(_sub.canister), Principal.equal, keyp(msg.caller), Principal.equal, 
         (_sub.subEventTypes, _sub.enAutoRenewal, _sub.renewalValue, 0) );
         monitorStats := {heartbeatCount = monitorStats.heartbeatCount; canisterCount = canisterCount; subscriberCount = subscriberCount; updateTime = monitorStats.updateTime; };
+        return true;
     };
     /// unsubscribe
     public shared(msg) func unsubscribe(_canisterId: CanisterId, _subscriber: Subscriber) : async (){
@@ -342,7 +411,7 @@ shared(installMsg) actor class ICMonitor() = this {
                         for ((subscriber, subInfo) in Trie.iter(trie)){
                             var sub: Subscription = { canister = _canisterId; subEventTypes = subInfo.0; enAutoRenewal = subInfo.1; renewalValue = subInfo.2; };
                             switch(Trie.get(canisters, keyp(_canisterId), Principal.equal)){
-                                case(?(status, hb)){ 
+                                case(?(status, hb, drc207)){ 
                                     ret := Array.append(ret, [{subscriber=subscriber; subscription=sub; canisterStatus=status; heartbeat=hb; timerHeartbeat=subInfo.3}]); 
                                 };
                                 case(_){};
@@ -359,7 +428,7 @@ shared(installMsg) actor class ICMonitor() = this {
                             case(?(subInfo)){
                                 var sub: Subscription = { canister = _canisterId; subEventTypes = subInfo.0; enAutoRenewal = subInfo.1; renewalValue = subInfo.2; };
                                 switch(Trie.get(canisters, keyp(_canisterId), Principal.equal)){
-                                    case(?(status, hb)){ 
+                                    case(?(status, hb, drc207)){ 
                                         ret := Array.append(ret, [{subscriber=subscriber; subscription=sub; canisterStatus=status; heartbeat=hb; timerHeartbeat=subInfo.3}]); 
                                     };
                                     case(_){};
@@ -378,44 +447,40 @@ shared(installMsg) actor class ICMonitor() = this {
     public shared func heartbeat() : async ({events: [Event]; completely: Bool}){
         _heartbeatCount();
         heartbeatIndex := Time.now()/INTERVAL;
-        let trieCanisters = Trie.filter(canisters, func (canister: CanisterId, status: (CanisterStatus, Heartbeat)): Bool{ heartbeatIndex > status.1 });
+        let trieCanisters = Trie.filter(canisters, func (canister: CanisterId, status: (CanisterStatus, Heartbeat, DRC207.DRC207Support)): Bool{ heartbeatIndex > status.1 });
         var _events: [Event] = [];
         var completely: Bool = false;
         var i: Nat = 0;
         label monitor for ((canisterId, status_) in Trie.iter(trieCanisters)){
             if (i < DEAL_SIZE){
-                let canisterActor: Monitee.Self = actor(Principal.toText(canisterId));
-                var temp: [CanisterStatus] = [];
-                try {
-                    temp := [await canisterActor.canister_status()];
-                }catch(e){
-                    try {
-                        temp := [await blackhole.canister_status({canister_id = canisterId})];
-                    }catch(e){
-                        continue monitor;
+                var status = status_;
+                switch(await _getCanisterStatus(canisterId, false)){
+                    case(?(getStatus)){
+                        status := getStatus;
                     };
+                    case(_){ continue monitor; };
                 };
-                let canisterStatus = temp[0];
-                let status = (canisterStatus, heartbeatIndex);
                 switch(Trie.get(subscriptions, keyp(canisterId), Principal.equal)){ 
                     // subscriber -> ([EventType], EnAutoRenewal, RenewalValue)
                     case(?(trie)){
                         for ((subscriber, subInfo) in Trie.iter(trie)){
                             for (eventType in subInfo.0.vals()){
                                 var trigger = false;
+                                var flag = false;
                                 switch(eventType){
                                     case(#StatusChanged){
-                                        if (status_.0.status != status.0.status){ trigger := true; };
+                                        if (status_.0.status != status.0.status){ trigger := true; flag := true; };
                                     };
                                     case(#MemorySizeGreaterThan(v)){
                                         if (status.0.memory_size > v){ trigger := true; };
                                     };
                                     case(#MemorySizeReachingAllocation){
-                                        if (status.0.settings.memory_allocation > 0 and status.0.memory_size >= status.0.settings.memory_allocation*95/100)
+                                        if (status.0.settings.memory_allocation > 0 and status.0.memory_size >= status.0.settings.memory_allocation*95/100 and 
+                                        status.0.memory_size < status.0.settings.memory_allocation*98/100)
                                         { trigger := true; };
                                     };
                                     case(#CyclesLessThan(v)){
-                                        if (status.0.cycles < v){ 
+                                        if (status.0.cycles < v and status.0.cycles > status.0.settings.freezing_threshold){ 
                                             trigger := true; 
                                             if (subInfo.1){
                                                 let res = /*await*/ _icpToCycles(subscriber, canisterId, subInfo.2);
@@ -423,16 +488,22 @@ shared(installMsg) actor class ICMonitor() = this {
                                         };
                                     };
                                     case(#ControllersChanged){ //not(Array.equal())
-                                        if (status_.0.settings.controllers != status.0.settings.controllers){ trigger := true; };
+                                        if (status_.0.settings.controllers != status.0.settings.controllers){ trigger := true; flag := true; };
                                     };
                                     case(#ModuleHashChanged){
-                                        if (status_.0.module_hash != status.0.module_hash){ trigger := true; };
+                                        if (status_.0.module_hash != status.0.module_hash){ trigger := true; flag := true; };
                                     };
-                                    case(#TimerTick(n)){
-                                        if (heartbeatIndex >= subInfo.3 + n){ 
-                                            let res = /*await*/ canisterActor.timer_tick();
-                                            subscriptions := Trie.put2D(subscriptions, keyp(canisterId), Principal.equal, keyp(subscriber), Principal.equal, 
-                                            (subInfo.0, subInfo.1, subInfo.2, heartbeatIndex) );
+                                    case(#TimerTick){
+                                        if (status.2.timer.enable){
+                                            let timerInerval = Option.get(status.2.timer.interval_seconds, 0) * 1000000000;
+                                            var intervalHB = timerInerval / INTERVAL;
+                                            if (intervalHB == 0) { intervalHB := 1; };
+                                            if (heartbeatIndex >= subInfo.3 + intervalHB){ 
+                                                let canisterActor: DRC207.Self = actor(Principal.toText(canisterId));
+                                                let res = /*await*/ canisterActor.timer_tick();
+                                                subscriptions := Trie.put2D(subscriptions, keyp(canisterId), Principal.equal, keyp(subscriber), Principal.equal, 
+                                                (subInfo.0, subInfo.1, subInfo.2, heartbeatIndex) );
+                                            };
                                         };
                                     };
                                 };
@@ -444,7 +515,7 @@ shared(installMsg) actor class ICMonitor() = this {
                                         eventType = eventType; 
                                         canisterStatus = status.0;
                                     };
-                                    if (_eventFilter(event)){
+                                    if (flag or _eventFilter(event)){
                                         _events := Array.append(_events, [event]);
                                         _pushEvent(event);
                                         eventCount += 1;
@@ -455,7 +526,6 @@ shared(installMsg) actor class ICMonitor() = this {
                     };
                     case(_){};
                 };
-                canisters := Trie.put(canisters, keyp(canisterId), Principal.equal, status).0;
             };
             i += 1;
         };
@@ -486,9 +556,18 @@ shared(installMsg) actor class ICMonitor() = this {
     /* 
      * Monitor
      */
-    /// query canister status: Add itself as a controller, canister_id = Principal.fromActor(<your actor name>)
-    public func canister_status() : async Monitee.canister_status {
-        let ic : Monitee.IC = actor("aaaaa-aa");
+    /// DRC207 support
+    public func drc207() : async DRC207.DRC207Support{
+        return {
+            monitorable_by_self = true;
+            monitorable_by_blackhole = { allowed = true; canister_id = ?Principal.fromText("7hdtw-jqaaa-aaaak-aaccq-cai"); };
+            cycles_receivable = true;
+            timer = { enable = true; interval_seconds = ?300; }; 
+        };
+    };
+    /// canister_status
+    public func canister_status() : async DRC207.canister_status {
+        let ic : DRC207.IC = actor("aaaaa-aa");
         await ic.canister_status({ canister_id = Principal.fromActor(this) });
     };
     /// timer_tick() is executed once per n(specified) heartbeats by Monitor (there is no guarantee that each heartbeat will be executed successfully)
@@ -519,7 +598,6 @@ shared(installMsg) actor class ICMonitor() = this {
     public shared(msg) func config(config: Config) : async Bool{ 
         assert(_onlyOwner(msg.caller));
         BLACKHOLE := Option.get(config.BLACKHOLE, BLACKHOLE);
-        blackhole := actor(BLACKHOLE);
         INTERVAL := Option.get(config.INTERVAL, INTERVAL);
         ICP_FEE := Option.get(config.ICP_FEE, ICP_FEE);
         DEAL_SIZE := Option.get(config.DEAL_SIZE, DEAL_SIZE);

@@ -2,7 +2,7 @@
  * Module     : Blackhole.mo
  * Author     : ninegua
  * Stability  : Stable
- * Canister   : 73hjh-6qaaa-aaaak-aacaq-cai
+ * Canister   : 7hdtw-jqaaa-aaaak-aaccq-cai
  * Github     : https://github.com/iclighthouse/ICMonitor
  * Refer      : https://github.com/ninegua/ic-blackhole
  */

@@ -2,7 +2,7 @@
 
 **Website:** http://ICMonitor.io  
 **Canister id:** 73hjh-6qaaa-aaaak-aacaq-cai  
-**ModuleHash:** 7500f02327d8c6e6df96b33ba92f88e039b3103c631f3efe0868ea2e7b2894c9
+**ModuleHash:** 66ce5cc3bfe5b5bc29da303dd2a924c2e21f3f22346ef91fa5d742d11a841fa3
 
 ## 简介（Overview）
 
@@ -34,7 +34,7 @@ ICMonitor提供的监视类型包括：
 
 注意：
 
-由于ICMonitor受IC网络机制限制，无法直接获取Canister的状态。如果需要使用ICMonitor监视Canister，需要将Blackhole(73hjh-6qaaa-aaaak-aacaq-cai)添加为controller之一，或者将Canister自己添加为controller之一并实现`canister_status : () -> ()`函数。
+由于ICMonitor受IC网络机制限制，无法直接获取Canister的状态。如果需要使用ICMonitor监视Canister，需要将Blackhole(7hdtw-jqaaa-aaaak-aaccq-cai)添加为controller之一，或者将Canister自己添加为controller之一并实现`canister_status : () -> ()`函数。
 
 参见“如何使用”的Step1部分。
 
@@ -50,10 +50,10 @@ Notes: UI界面 http://ICMonitor.io
 
 **Option 1:** 
 
-设置Blackhole(73hjh-6qaaa-aaaak-aacaq-cai)为你的Canister的controller之一。
+设置Blackhole(7hdtw-jqaaa-aaaak-aaccq-cai)为你的Canister的controller之一。
 
 ````
-dfx canister --network ic call aaaaa-aa update_settings '(record {canister_id=principal "<your_canister_id>"; settings= record {controllers=vec {principal "<your_controller_principal>"; principal "73hjh-6qaaa-aaaak-aacaq-cai"}}})'
+dfx canister --network ic call aaaaa-aa update_settings '(record {canister_id=principal "<your_canister_id>"; settings= record {controllers=vec {principal "<your_controller_principal>"; principal "7hdtw-jqaaa-aaaak-aaccq-cai"}}})'
 ````
     
     **关于Blackhole**
